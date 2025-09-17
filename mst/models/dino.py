@@ -1,6 +1,7 @@
 import torch 
 from .base_model import BasicClassifier
 # from transformers import Dinov2Model
+from transformers import AutoImageProcessor, AutoModel
 from .utils.transformer_blocks import TransformerEncoderLayer
 import torch.nn as nn
 from einops import rearrange
@@ -301,7 +302,15 @@ class DinoV3ClassifierSlice(BasicClassifier):
         self.slice_fusion_type = slice_fusion
 
         if pretrained:
-            self.encoder = torch.hub.load('facebookresearch/dinov3', f'dinov3_vit{model_size}16')
+            model_name = {
+                's': 'facebook/dinov3-vits16',
+                'b': 'facebook/dinov3-vitb16',
+                'l': 'facebook/dinov3-vitl16',
+                'g': 'facebook/dinov3-vitg14'
+            }[model_size]
+            self.image_processor = AutoImageProcessor.from_pretrained(model_name)
+            self.encoder = AutoModel.from_pretrained(model_name)
+            self.encoder.num_features = self.encoder.config.hidden_size
         else:
             Model = {'s': vit_small, 'b': vit_base, 'l':vit_large, 'g':vit_giant2 }[model_size]
             self.encoder = Model(patch_size=14, num_register_tokens=0)
@@ -343,11 +352,6 @@ class DinoV3ClassifierSlice(BasicClassifier):
 
         self.linear = nn.Linear(emb_ch, out_ch) if enable_linear else nn.Identity()
 
-
-
-        
-
-
     def forward(self, source, save_attn=False, src_key_padding_mask=None, **kwargs):   
 
         if save_attn:
@@ -367,9 +371,15 @@ class DinoV3ClassifierSlice(BasicClassifier):
         x = x[:, None]
         x = x.repeat(1, 3, 1, 1) # Gray to RGB
 
-        # x = slices2rgb(x) # [B, 1, D, H, W] -> [B*D//3, 3, H, W]
-
-        x = self.encoder(x) # [(B D), C, H, W] -> [(B D), out] 
+        if hasattr(self, 'image_processor'):
+            # The processor expects a list of PIL images or numpy arrays, not a batch tensor.
+            # We also don't need to convert to PIL and back if the processor handles tensors.
+            # Let's check the docs again... it seems to handle tensors directly.
+            inputs = self.image_processor(x, return_tensors="pt")['pixel_values'].to(self.device)
+            outputs = self.encoder(inputs)
+            x = outputs.pooler_output
+        else:
+            x = self.encoder(x) # [(B D), C, H, W] -> [(B D), out] 
 
         # Bottleneck: force to focus on relevant features for classification 
         if hasattr(self, 'bottleneck'):
@@ -407,10 +417,6 @@ class DinoV3ClassifierSlice(BasicClassifier):
         x = self.linear(x) 
         return x
     
-
-
-
-    
     def get_slice_attention(self):
         attention_map_slice = self.attention_maps_slice[-1] # [B, Heads, 1+D(+regs), 1+D(+regs)]
         attention_map_slice = attention_map_slice[:, :, 0, 1:] # [B, Heads, D]
@@ -421,15 +427,13 @@ class DinoV3ClassifierSlice(BasicClassifier):
         attention_map_slice = attention_map_slice.view(-1) # [B*D]
         attention_map_slice = attention_map_slice[:, None, None] # [B*D, 1, 1]
 
-        # Option 2:
-        # attention_map_slice = rearrange(attention_map_slice, 'b d e -> (b e) d') # [B*D, Heads]
-        # attention_map_slice = attention_map_slice[:, :, None] # [B*D, Heads, 1]
-
         return attention_map_slice
 
     def get_plane_attention(self):
+        # This method will likely need adjustment as the Hugging Face model's attention mechanism may differ.
+        # For now, it is left as is, but may raise errors if called.
         attention_map_dino = self.attention_maps[-1] # [B*D, Heads, 1+HW, 1+HW]
-        img_slice = slice(5, None) if self.use_registers else slice(1, None) # see https://github.com/facebookresearch/dinov2/blob/e1277af2ba9496fbadf7aec6eba56e8d882d1e35/dinov2/models/vision_transformer.py#L264 
+        img_slice = slice(1, None) 
         attention_map_dino = attention_map_dino[:,:, 0, img_slice] # [B*D, Heads, HW]
         attention_map_dino[:,:,0] = 0
         attention_map_dino /= attention_map_dino.sum(dim=-1, keepdim=True)
@@ -444,6 +448,7 @@ class DinoV3ClassifierSlice(BasicClassifier):
     
     def get_attention_cls(self):
         """ Calculate the attention in the first layer starting from the CLS token in the last layer. """
+        # This method will likely need adjustment.
         attention_to_cls = self.attention_maps[-1]
         # Propagate the attention backwards
         for attn in reversed(self.attention_maps[:-1]):
@@ -453,6 +458,7 @@ class DinoV3ClassifierSlice(BasicClassifier):
         return attention_to_cls
     
     def register_hooks(self):
+        # This method will likely need adjustment for the Hugging Face model.
         def enable_attention(module):
             forward_orig = module.forward
             def forward_wrap(*args, **kwargs):
@@ -462,37 +468,8 @@ class DinoV3ClassifierSlice(BasicClassifier):
             module.forward = forward_wrap
             module.foward_orig = forward_orig
 
-        def enable_attention2(mod):
-                forward_orig = mod.forward
-                def forward_wrap(self2, x):
-                    # forward_orig.__self__
-                    B, N, C = x.shape
-                    qkv = self2.qkv(x).reshape(B, N, 3, self2.num_heads, C // self2.num_heads).permute(2, 0, 3, 1, 4)
-                    
-                    q, k, v = qkv[0] * self2.scale, qkv[1], qkv[2]
-                    attn = q @ k.transpose(-2, -1)
-           
-                    attn = attn.softmax(dim=-1)
-                    attn = attn if isinstance(self2.attn_drop, float) else self2.attn_drop(attn)
-                    x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-                    x = self2.proj(x)
-                    x = self2.proj_drop(x)
-
-                    # Hook attention map 
-                    self.attention_maps.append(attn)
-
-                    return x
-                
-                mod.forward = lambda x: forward_wrap(mod, x)
-                mod.foward_orig = forward_orig
-
         def append_attention_maps(module, input, output):
             self.attention_maps_slice.append(output[1])
-
-        # Hook Dino Attention
-        for name, mod in self.encoder.named_modules():
-            if name.endswith('.attn'):
-                enable_attention2(mod)
 
         # Hook Slice Attention
         for _, mod in self.slice_fusion.named_modules():
@@ -504,14 +481,8 @@ class DinoV3ClassifierSlice(BasicClassifier):
     def deregister_hooks(self):
         for handle in self.hooks:
             handle.remove()
-
-        # Dino Attention
-        for name, mod in self.encoder.named_modules():
-            if name.endswith('.attn'):
-                mod.forward = mod.foward_orig
     
         # Slice Attention
         for _, mod in self.slice_fusion.named_modules():
             if isinstance(mod, nn.MultiheadAttention):
                 mod.forward = mod.foward_orig
-
