@@ -15,7 +15,7 @@ from mst.data.datasets.dataset_3d_mrnet import MRNet_Dataset3D
 
 from mst.data.datamodules import DataModule
 from mst.models.resnet import ResNet, ResNetSliceTrans
-from mst.models.dino import DinoV2ClassifierSlice
+from mst.models.dino import DinoV2ClassifierSlice, DinoV3ClassifierSlice
 
 def get_dataset(name, split, **kwargs):
     if name == 'DUKE':
@@ -34,6 +34,8 @@ def get_model(name, **kwargs):
         return ResNetSliceTrans(in_ch=1, out_ch=2, spatial_dims=2, **kwargs)
     elif name == 'DinoV2ClassifierSlice':
         return DinoV2ClassifierSlice(in_ch=3, out_ch=2, spatial_dims=2, **kwargs)
+    elif name == 'DinoV3ClassifierSlice':
+        return DinoV3ClassifierSlice(in_ch=3, out_ch=2, spatial_dims=2, **kwargs)
     else:
         raise ValueError(f"Unknown model: {name}")
 
