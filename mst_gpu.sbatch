@@ -15,4 +15,4 @@ export PYTHONPATH=$PWD:$PYTHONPATH
 
 hostname
 nvidia-smi || true
-uv run /vast/projects/bbruno/new-vit/scripts/main_train.py --dataset DUKE --model DinoV3ClassifierSlice
+uv run /vast/projects/bbruno/breast-imaging/new-vit/scripts/main_train.py --dataset DUKE --model DinoV3ClassifierSlice
