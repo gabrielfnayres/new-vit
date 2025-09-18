@@ -1,14 +1,12 @@
 import argparse
 from pathlib import Path
 from datetime import datetime
-import wandb 
 import torch 
 import transformers
 print(f"PyTorch version: {torch.__version__}")
 print(f"Transformers version: {transformers.__version__}")
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import LearningRateMonitor
 
 
@@ -94,7 +92,7 @@ if __name__ == "__main__":
     to_monitor = "val/AUC_ROC"
     min_max = "max"
     log_every_n_steps = 50
-    logger = WandbLogger(project=f'Classifier_{args.dataset}', name=type(model).__name__, log_model=False)
+    logger = None  # No logging
     lr_monitor = LearningRateMonitor(logging_interval='step')
     early_stopping = EarlyStopping(
         monitor=to_monitor,
@@ -130,4 +128,4 @@ if __name__ == "__main__":
     # ------------- Save path to best model -------------
     model.save_best_checkpoint(path_run_dir, checkpointing.best_model_path)
 
-    wandb.finish(quiet=True)
+    # No logging cleanup needed
