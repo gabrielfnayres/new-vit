@@ -79,7 +79,13 @@ class DUKE_Dataset3D(data.Dataset):
         else:
             formatted_uid = str(uid).zfill(3)
 
-        patient_id = f'Breast_MRI_{formatted_uid}'
+        # For HDF5 access, remove laterality suffix since HDF5 keys don't include it
+        if '_' in formatted_uid:
+            h5_patient_number = formatted_uid.split('_')[0]
+        else:
+            h5_patient_number = formatted_uid
+        
+        patient_id = f'Breast_MRI_{h5_patient_number}'
         scan_name = 'sub'
 
         with h5py.File(self.path_h5, 'r') as f:
