@@ -3,6 +3,9 @@ from pathlib import Path
 from datetime import datetime
 import wandb 
 import torch 
+import transformers
+print(f"PyTorch version: {torch.__version__}")
+print(f"Transformers version: {transformers.__version__}")
 from pytorch_lightning.trainer import Trainer
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
