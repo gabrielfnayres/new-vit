@@ -303,10 +303,10 @@ class DinoV3ClassifierSlice(BasicClassifier):
 
         if pretrained:
             model_name = {
-                's': 'facebook/dinov3-vits16',
-                'b': 'facebook/dinov3-vitb16',
-                'l': 'facebook/dinov3-vitl16',
-                'g': 'facebook/dinov3-vitg14'
+                's': 'facebook/dinov3-vits16-pretrain-lvd1689m',
+                'b': 'facebook/dinov3-vitb16-pretrain-lvd1689m',
+                'l': 'facebook/dinov3-vitl16-pretrain-lvd1689m',
+                'g': 'facebook/dinov3-vitg14-pretrain-lvd1689m'
             }[model_size]
             self.image_processor = AutoImageProcessor.from_pretrained(model_name)
             self.encoder = AutoModel.from_pretrained(model_name)
