@@ -10,7 +10,7 @@ from .augmentations.augmentations_3d import ImageOrSubjectToTensor, RescaleInten
 
 
 class DUKE_Dataset3D(data.Dataset):
-    PATH_ROOT = Path(__file__).parent.parent.parent.parent / 'dummy_data'
+    PATH_ROOT = Path('/vast/projects/bbruno/breast-imaging/gabriel/vit-gabriel/side_v3')
     LABEL = 'Malignant'
 
     def __init__(
@@ -24,7 +24,7 @@ class DUKE_Dataset3D(data.Dataset):
             resample=None,
             flip=False,
             random_rotate=False,
-            image_crop=(512, 512, 32),
+            image_crop=(224, 224, 32),
             random_center=False,
             noise=False,
             to_tensor=True,
@@ -50,7 +50,7 @@ class DUKE_Dataset3D(data.Dataset):
             self.transform = transform
 
         # Get split file
-        path_csv = self.path_root / 'split.csv'
+        path_csv = self.path_root / 'splits' / 'split.csv'
         path_or_stream = path_csv
         self.df = self.load_split(path_or_stream, fold=fold, split=split, fraction=fraction)
 
@@ -85,7 +85,7 @@ class DUKE_Dataset3D(data.Dataset):
         else:
             h5_patient_number = formatted_uid
         
-        patient_id = f'Breast_MRI_{h5_patient_number}'
+        patient_id = f'Breast_MRI_{formatted_uid}'
         scan_name = 'sub'
 
         with h5py.File(self.path_h5, 'r') as f:

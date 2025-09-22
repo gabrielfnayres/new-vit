@@ -97,7 +97,7 @@ if __name__ == "__main__":
     early_stopping = EarlyStopping(
         monitor=to_monitor,
         min_delta=0.0,
-        patience=50,
+        patience=10,
         mode=min_max
     )
     checkpointing = ModelCheckpoint(

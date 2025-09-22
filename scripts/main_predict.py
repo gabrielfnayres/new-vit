@@ -66,27 +66,56 @@ def _pred_trans(model, source, src_key_padding_mask, save_attn=False, use_softma
     if not save_attn:
         return pred, None, None 
 
-    # Spatial attention     
-    weight = model.get_attention_maps()  # [B*D, Heads, HW]
-    weight = weight.mean(dim=1) # Mean of heads 
+    # Combined attention (slice × patch attention)
+    print(f"Getting combined attention maps from model type: {type(model).__name__}")
+    weight_combined = model.get_attention_maps()  # [B*D, Heads, HW] - already slice × patch
+    print(f"Combined attention weight shape: {weight_combined.shape}")
+    
+    if weight_combined.dim() == 3:  # [B*D, Heads, HW]
+        weight_combined = weight_combined.mean(dim=1) # Mean of heads 
+    print(f"After head averaging combined: {weight_combined.shape}")
+    
+    # Patch attention only
+    print(f"Getting patch attention...")
+    weight_patch = model.get_plane_attention()  # [B*D, Heads, HW]
+    print(f"Patch attention shape: {weight_patch.shape}")
+    
+    if weight_patch.dim() == 3:  # [B*D, Heads, HW]
+        weight_patch = weight_patch.mean(dim=1) # Mean of heads 
+    print(f"After head averaging patch: {weight_patch.shape}")
     
     # Calculate spatial shape based on model type and actual weight dimensions
     if isinstance(model, ResNetSliceTrans):
-        spatial_shape = weight.shape[-2:]
+        spatial_shape = weight_combined.shape[-2:]
     else:
         # For DinoV3/V2, calculate spatial dimensions from weight tensor
         B, D = source.shape[0], source.shape[2]
-        total_spatial_tokens = weight.shape[-1]
+        total_spatial_tokens = weight_combined.shape[-1]
         spatial_dim = int(total_spatial_tokens ** 0.5)  # Assume square spatial layout
         spatial_shape = (spatial_dim, spatial_dim)
     
-    weight = weight.view(1, 1, source.shape[2], *spatial_shape)
+    print(f"Calculated spatial shape: {spatial_shape}")
+    print(f"Source shape: {source.shape}")
+    
+    # Reshape both attention maps
+    weight_combined = weight_combined.view(1, 1, source.shape[2], *spatial_shape)
+    weight_patch = weight_patch.view(1, 1, source.shape[2], *spatial_shape)
+    print(f"Reshaped combined weight: {weight_combined.shape}")
+    print(f"Reshaped patch weight: {weight_patch.shape}")
 
     # Slice attention 
-    weight_slice = model.get_slice_attention() # [B*D, Heads, 1]
-    weight_slice = weight_slice.mean(dim=1) # Mean of heads 
-    weight_slice = weight_slice.view(1, 1, -1, 1, 1)*torch.ones_like(source, device=weight.device)
-    return pred, weight, weight_slice
+    print(f"Getting slice attention...")
+    weight_slice = model.get_slice_attention() # [B*D, Heads, 1] or [B*D, 1, 1]
+    print(f"Raw slice attention shape: {weight_slice.shape}")
+    
+    if weight_slice.dim() == 3 and weight_slice.shape[1] > 1:  # [B*D, Heads, 1]
+        weight_slice = weight_slice.mean(dim=1) # Mean of heads 
+        print(f"After head averaging slice: {weight_slice.shape}")
+    
+    weight_slice = weight_slice.view(1, 1, -1, 1, 1)*torch.ones_like(source, device=weight_combined.device)
+    print(f"Final slice attention shape: {weight_slice.shape}")
+    
+    return pred, weight_combined, weight_patch, weight_slice
 
 
 
@@ -125,26 +154,48 @@ def run_pred(model, batch, save_attn=False, use_softmax=True, use_tta=False):
     elif isinstance(model, DinoV3ClassifierSlice):
         pred_func = _pred_trans
 
-    pred, weight, weight_slice = pred_func(model, source, src_key_padding_mask, save_attn, use_softmax)    
-
-    if use_tta:
-        for flip_dim in [(2,), (3,), (4,), (2,3), (2,4), (3,4), (2,3,4),]:
-            pred_i, weight_i, weight_slice_i = pred_func(model, torch.flip(source, flip_dim), src_key_padding_mask, save_attn, use_softmax)
-            pred = pred + pred_i
-            if save_attn:
-                weight = weight + torch.flip(weight_i, flip_dim)
+    if save_attn and isinstance(model, (DinoV2ClassifierSlice, DinoV3ClassifierSlice)):
+        pred, weight_combined, weight_patch, weight_slice = pred_func(model, source, src_key_padding_mask, save_attn, use_softmax)
+        
+        if use_tta:
+            for flip_dim in [(2,), (3,), (4,), (2,3), (2,4), (3,4), (2,3,4),]:
+                pred_i, weight_combined_i, weight_patch_i, weight_slice_i = pred_func(model, torch.flip(source, flip_dim), src_key_padding_mask, save_attn, use_softmax)
+                pred = pred + pred_i
+                weight_combined = weight_combined + torch.flip(weight_combined_i, flip_dim)
+                weight_patch = weight_patch + torch.flip(weight_patch_i, flip_dim)
                 weight_slice = weight_slice + torch.flip(weight_slice_i, flip_dim)
 
-        pred = pred / 8
-        if save_attn:
-            weight = weight / 8
+            pred = pred / 8
+            weight_combined = weight_combined / 8
+            weight_patch = weight_patch / 8
             weight_slice = weight_slice / 8
 
-    # Interpolate to required size 
-    if save_attn:
-        weight = F.interpolate(weight, size=source.shape[2:], mode='trilinear')
+        # Interpolate to required size 
+        weight_combined = F.interpolate(weight_combined, size=source.shape[2:], mode='trilinear')
+        weight_patch = F.interpolate(weight_patch, size=source.shape[2:], mode='trilinear')
+        
+        return pred, weight_combined, weight_patch, weight_slice
+    else:
+        pred, weight, weight_slice = pred_func(model, source, src_key_padding_mask, save_attn, use_softmax)    
 
-    return pred, weight, weight_slice 
+        if use_tta:
+            for flip_dim in [(2,), (3,), (4,), (2,3), (2,4), (3,4), (2,3,4),]:
+                pred_i, weight_i, weight_slice_i = pred_func(model, torch.flip(source, flip_dim), src_key_padding_mask, save_attn, use_softmax)
+                pred = pred + pred_i
+                if save_attn:
+                    weight = weight + torch.flip(weight_i, flip_dim)
+                    weight_slice = weight_slice + torch.flip(weight_slice_i, flip_dim)
+
+            pred = pred / 8
+            if save_attn:
+                weight = weight / 8
+                weight_slice = weight_slice / 8
+
+        # Interpolate to required size 
+        if save_attn:
+            weight = F.interpolate(weight, size=source.shape[2:], mode='trilinear')
+
+        return pred, weight, weight_slice 
 
 
 
@@ -268,30 +319,114 @@ if __name__ == "__main__":
             #     break 
 
             # Run prediction 
-            pred, weight, weight_slice = run_pred(model, batch, save_attn=True, use_softmax=use_tta, use_tta=use_tta)
-
+            print(f"\n=== Processing UID: {uid} ===")
             
-            # Clip  
-            weight_slice = weight_slice.detach().cpu()
-            weight_slice /= weight_slice.sum()
+            if isinstance(model, (DinoV2ClassifierSlice, DinoV3ClassifierSlice)):
+                pred, weight_combined, weight_patch, weight_slice = run_pred(model, batch, save_attn=True, use_softmax=use_tta, use_tta=use_tta)
+                
+                print(f"Prediction output - pred: {pred.shape if pred is not None else None}")
+                print(f"Combined attention (slice×patch): {weight_combined.shape if weight_combined is not None else None}")
+                print(f"Patch attention: {weight_patch.shape if weight_patch is not None else None}")
+                print(f"Slice attention: {weight_slice.shape if weight_slice is not None else None}")
+                
+                if weight_combined is None or weight_patch is None or weight_slice is None:
+                    print(f"Skipping {uid} - missing attention maps")
+                    continue
+                
+                # Process attention maps
+                weight_slice = weight_slice.detach().cpu()
+                weight_slice_sum = weight_slice.sum()
+                print(f"Weight slice sum before normalization: {weight_slice_sum}")
+                if weight_slice_sum > 0:
+                    weight_slice /= weight_slice_sum
+                else:
+                    print("Warning: weight_slice sum is zero, using uniform distribution")
+                    weight_slice = torch.ones_like(weight_slice) / weight_slice.numel()
 
-            weight = weight.detach().cpu()
-            weight = weight.clip(*np.quantile(weight, [0.995, 0.999]))
+                weight_combined = weight_combined.detach().cpu()
+                weight_patch = weight_patch.detach().cpu()
+                
+                # Normalize combined attention
+                weight_combined_min, weight_combined_max = weight_combined.min(), weight_combined.max()
+                print(f"Combined attention stats - min: {weight_combined_min:.6f}, max: {weight_combined_max:.6f}")
+                if weight_combined_max > weight_combined_min:
+                    weight_combined = (weight_combined - weight_combined_min) / (weight_combined_max - weight_combined_min)
+                else:
+                    print("Warning: uniform combined attention tensor, using fallback normalization")
+                    weight_combined = torch.ones_like(weight_combined) * 0.5
+                
+                # Normalize patch attention
+                weight_patch_min, weight_patch_max = weight_patch.min(), weight_patch.max()
+                print(f"Patch attention stats - min: {weight_patch_min:.6f}, max: {weight_patch_max:.6f}")
+                if weight_patch_max > weight_patch_min:
+                    weight_patch = (weight_patch - weight_patch_min) / (weight_patch_max - weight_patch_min)
+                else:
+                    print("Warning: uniform patch attention tensor, using fallback normalization")
+                    weight_patch = torch.ones_like(weight_patch) * 0.5
+            else:
+                pred, weight, weight_slice = run_pred(model, batch, save_attn=True, use_softmax=use_tta, use_tta=use_tta)
+                
+                print(f"Prediction output - pred: {pred.shape if pred is not None else None}")
+                print(f"Weight output - weight: {weight.shape if weight is not None else None}")
+                print(f"Weight slice output - weight_slice: {weight_slice.shape if weight_slice is not None else None}")
+                
+                if weight is None or weight_slice is None:
+                    print(f"Skipping {uid} - missing attention maps")
+                    continue
+                
+                # Process attention maps for non-Dino models
+                weight_slice = weight_slice.detach().cpu()
+                weight_slice_sum = weight_slice.sum()
+                if weight_slice_sum > 0:
+                    weight_slice /= weight_slice_sum
+                else:
+                    weight_slice = torch.ones_like(weight_slice) / weight_slice.numel()
+
+                weight = weight.detach().cpu()
+                weight_min, weight_max = weight.min(), weight.max()
+                if weight_max > weight_min:
+                    weight = (weight - weight_min) / (weight_max - weight_min)
+                else:
+                    weight = torch.ones_like(weight) * 0.5
 
 
             # Save 
+            print(f"Saving attention visualizations for {uid}...")
             save_image(tensor2image(source), path_out_dir/f'input_{uid}.png', normalize=True)
-            save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight), alpha=0.5), 
-                        path_out_dir/f"overlay_{uid}.png", normalize=False)
-            save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight_slice), alpha=0.5), 
-                        path_out_dir/f"overlay_{uid}_slice.png", normalize=False)
+            
+            if isinstance(model, (DinoV2ClassifierSlice, DinoV3ClassifierSlice)):
+                # Combined attention (slice × patch) - this is the main result
+                save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight_combined), alpha=0.5), 
+                            path_out_dir/f"overlay_{uid}_combined.png", normalize=False)
+                
+                # Patch attention only (from DinoV3 encoder)
+                save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight_patch), alpha=0.5), 
+                            path_out_dir/f"overlay_{uid}_patch.png", normalize=False)
+                
+                # Slice attention only
+                save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight_slice), alpha=0.5), 
+                            path_out_dir/f"overlay_{uid}_slice.png", normalize=False)
+                
+                print(f"Saved 4 attention visualizations for {uid}: input, combined (slice×patch), patch, slice")
+            else:
+                # For non-Dino models
+                save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight), alpha=0.5), 
+                            path_out_dir/f"overlay_{uid}_spatial.png", normalize=False)
+                
+                save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight_slice), alpha=0.5), 
+                            path_out_dir/f"overlay_{uid}_slice.png", normalize=False)
+                
+                print(f"Saved 3 attention visualizations for {uid}: input, spatial, slice")
             if dataset in ['LIDC']:
                 save_image(tensor_cam2image(minmax_norm(source), minmax_norm(batch['mask'].detach().cpu()), alpha=0.5),
                             path_out_dir/f"overlay_{uid}_gt.png", normalize=False) 
                 
         else:
             # Run prediction 
-             pred, _, _ = run_pred(model, batch, save_attn=False, use_softmax=use_tta, use_tta=use_tta)
+            if isinstance(model, (DinoV2ClassifierSlice, DinoV3ClassifierSlice)):
+                pred, _, _, _ = run_pred(model, batch, save_attn=False, use_softmax=use_tta, use_tta=use_tta)
+            else:
+                pred, _, _ = run_pred(model, batch, save_attn=False, use_softmax=use_tta, use_tta=use_tta)
 
         pred = pred.cpu()
 
