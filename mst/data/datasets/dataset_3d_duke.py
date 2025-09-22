@@ -10,7 +10,8 @@ from .augmentations.augmentations_3d import ImageOrSubjectToTensor, RescaleInten
 
 
 class DUKE_Dataset3D(data.Dataset):
-    PATH_ROOT = Path(__file__).parent.parent.parent.parent / 'dummy_data' / 'side_v3'
+    #PATH_ROOT = Path(__file__).parent.parent.parent.parent / 'dummy_data' / 'side_v3'
+    PATH_ROOT = Path('/vast/projects/bbruno/breast-imaging/gabriel/vit-gabriel')/'side_v3'
     LABEL = 'Malignant'
 
     def __init__(
