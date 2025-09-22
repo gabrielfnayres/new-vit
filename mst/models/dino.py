@@ -300,17 +300,37 @@ class DinoV3ClassifierSlice(BasicClassifier):
         self.attention_maps = []
         self.attention_maps_slice = []
         self.slice_fusion_type = slice_fusion
+        self.model_size = model_size
 
         if pretrained:
-            model_name = {
-                's': 'facebook/dinov3-vits16-pretrain-lvd1689m',
-                'b': 'facebook/dinov3-vitb16-pretrain-lvd1689m',
-                'l': 'facebook/dinov3-vitl16-pretrain-lvd1689m',
-                'g': 'facebook/dinov3-vitg14-pretrain-lvd1689m'
-            }[model_size]
-            self.image_processor = AutoImageProcessor.from_pretrained(model_name)
-            self.encoder = AutoModel.from_pretrained(model_name)
-            self.encoder.num_features = self.encoder.config.hidden_size
+            # Use official Meta DinoV3 weights via torch.hub for better attention extraction
+            model_urls = {
+                's': 'https://dinov3.llamameta.net/dinov3_vits16/dinov3_vits16_pretrain_lvd1689m-08c60483.pth?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoiYjNsY3Y3aDRsNGM0M2tzamV1b3J1cXViIiwiUmVzb3VyY2UiOiJodHRwczpcL1wvZGlub3YzLmxsYW1hbWV0YS5uZXRcLyoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTg3MzY0ODJ9fX1dfQ__&Signature=uDC5hc1DpqbPP0EDRyVfibgojYt9CzQ3a3q9Hpfx1B%7E5IUhFHnhS3kaS25xF8mIIO5O20bodnF1BFNAUNfjr6rZzm1qJwfbUjgHw1RTYBV5b7c5lEFwMg7oFRz6qliOKBjePSgj78wstu82pnOrNqgdTRMW4moVYNJU1P5V1Y2ALXSQSXoQ0Y4llCzZeCECAAvTw3Tyutkygm3FqPrvty14xBNgUFJoSXGSSQ3r2ty%7ECgFoDsy1hhUEhtD3TIlhJEOGawS8kci2vxMzQSuFSEwNa8kibelXnOF1IEYY7x8yusLOb4A1psljuTJDNEG2BrcP08L4Ve66TpesUD3KYXw__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=4145608132324923',
+                'b': 'https://dinov3.llamameta.net/dinov3_vitb16/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoiYjNsY3Y3aDRsNGM0M2tzamV1b3J1cXViIiwiUmVzb3VyY2UiOiJodHRwczpcL1wvZGlub3YzLmxsYW1hbWV0YS5uZXRcLyoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTg3MzY0ODJ9fX1dfQ__&Signature=uDC5hc1DpqbPP0EDRyVfibgojYt9CzQ3a3q9Hpfx1B%7E5IUhFHnhS3kaS25xF8mIIO5O20bodnF1BFNAUNfjr6rZzm1qJwfbUjgHw1RTYBV5b7c5lEFwMg7oFRz6qliOKBjePSgj78wstu82pnOrNqgdTRMW4moVYNJU1P5V1Y2ALXSQSXoQ0Y4llCzZeCECAAvTw3Tyutkygm3FqPrvty14xBNgUFJoSXGSSQ3r2ty%7ECgFoDsy1hhUEhtD3TIlhJEOGawS8kci2vxMzQSuFSEwNa8kibelXnOF1IEYY7x8yusLOb4A1psljuTJDNEG2BrcP08L4Ve66TpesUD3KYXw__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=4145608132324923',
+                'l': 'https://dinov3.llamameta.net/dinov3_vitl16/dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoiYjNsY3Y3aDRsNGM0M2tzamV1b3J1cXViIiwiUmVzb3VyY2UiOiJodHRwczpcL1wvZGlub3YzLmxsYW1hbWV0YS5uZXRcLyoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTg3MzY0ODJ9fX1dfQ__&Signature=uDC5hc1DpqbPP0EDRyVfibgojYt9CzQ3a3q9Hpfx1B%7E5IUhFHnhS3kaS25xF8mIIO5O20bodnF1BFNAUNfjr6rZzm1qJwfbUjgHw1RTYBV5b7c5lEFwMg7oFRz6qliOKBjePSgj78wstu82pnOrNqgdTRMW4moVYNJU1P5V1Y2ALXSQSXoQ0Y4llCzZeCECAAvTw3Tyutkygm3FqPrvty14xBNgUFJoSXGSSQ3r2ty%7ECgFoDsy1hhUEhtD3TIlhJEOGawS8kci2vxMzQSuFSEwNa8kibelXnOF1IEYY7x8yusLOb4A1psljuTJDNEG2BrcP08L4Ve66TpesUD3KYXw__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=4145608132324923',
+                'g': 'https://dinov3.llamameta.net/dinov3_vit7b16/dinov3_vit7b16_pretrain_lvd1689m-a955f4ea.pth?Policy=eyJTdGF0ZW1lbnQiOlt7InVuaXF1ZV9oYXNoIjoiYjNsY3Y3aDRsNGM0M2tzamV1b3J1cXViIiwiUmVzb3VyY2UiOiJodHRwczpcL1wvZGlub3YzLmxsYW1hbWV0YS5uZXRcLyoiLCJDb25kaXRpb24iOnsiRGF0ZUxlc3NUaGFuIjp7IkFXUzpFcG9jaFRpbWUiOjE3NTg3MzY0ODJ9fX1dfQ__&Signature=uDC5hc1DpqbPP0EDRyVfibgojYt9CzQ3a3q9Hpfx1B%7E5IUhFHnhS3kaS25xF8mIIO5O20bodnF1BFNAUNfjr6rZzm1qJwfbUjgHw1RTYBV5b7c5lEFwMg7oFRz6qliOKBjePSgj78wstu82pnOrNqgdTRMW4moVYNJU1P5V1Y2ALXSQSXoQ0Y4llCzZeCECAAvTw3Tyutkygm3FqPrvty14xBNgUFJoSXGSSQ3r2ty%7ECgFoDsy1hhUEhtD3TIlhJEOGawS8kci2vxMzQSuFSEwNa8kibelXnOF1IEYY7x8yusLOb4A1psljuTJDNEG2BrcP08L4Ve66TpesUD3KYXw__&Key-Pair-Id=K15QRJLYKIFSLZ&Download-Request-ID=4145608132324923'
+            }
+            
+            try:
+                # Try loading official Meta weights first
+                model_url = model_urls[model_size]
+                self.encoder = torch.hub.load('facebookresearch/dinov3', f'dinov3_vit{model_size}16', weights=model_url)
+                self.encoder.num_features = self.encoder.embed_dim
+                self.use_official_weights = True
+                print(f"Loaded official DinoV3 {model_size} weights from Meta")
+            except Exception as e:
+                print(f"Failed to load official weights, falling back to Hugging Face: {e}")
+                # Fallback to Hugging Face transformers
+                model_name = {
+                    's': 'facebook/dinov3-vits16-pretrain-lvd1689m',
+                    'b': 'facebook/dinov3-vitb16-pretrain-lvd1689m',
+                    'l': 'facebook/dinov3-vitl16-pretrain-lvd1689m',
+                    'g': 'facebook/dinov3-vitg14-pretrain-lvd1689m'
+                }[model_size]
+                self.image_processor = AutoImageProcessor.from_pretrained(model_name)
+                self.encoder = AutoModel.from_pretrained(model_name)
+                self.encoder.num_features = self.encoder.config.hidden_size
+                self.use_official_weights = False
         else:
             Model = {'s': vit_small, 'b': vit_base, 'l':vit_large, 'g':vit_giant2 }[model_size]
             self.encoder = Model(patch_size=14, num_register_tokens=0)
@@ -320,7 +340,6 @@ class DinoV3ClassifierSlice(BasicClassifier):
             for param in self.encoder.parameters():
                 param.requires_grad = False
 
-    
         emb_ch = self.encoder.num_features 
         if use_bottleneck:
             self.bottleneck = nn.Linear(emb_ch, emb_ch//4)
@@ -351,42 +370,146 @@ class DinoV3ClassifierSlice(BasicClassifier):
             pass 
 
         self.linear = nn.Linear(emb_ch, out_ch) if enable_linear else nn.Identity()
+        
+        # Store attention hooks
+        self.attention_hooks = []
+
+    def _register_attention_hooks(self):
+        """Register hooks to capture attention weights from DinoV3 encoder"""
+        self.attention_maps = []
+        
+        def attention_hook(module, input, output):
+            # For DinoV3, attention weights might be in different positions
+            # Try to capture attention from the multi-head attention modules
+            if hasattr(module, 'attention') and hasattr(module.attention, 'get_attention_map'):
+                attn_weights = module.attention.get_attention_map()
+                if attn_weights is not None:
+                    self.attention_maps.append(attn_weights.detach())
+            elif len(output) > 1 and isinstance(output[1], torch.Tensor):
+                # Some attention modules return (output, attention_weights)
+                attn_weights = output[1]
+                if attn_weights.dim() == 4:  # [batch, heads, seq_len, seq_len]
+                    self.attention_maps.append(attn_weights.detach())
+        
+        # Hook into transformer blocks
+        for name, module in self.encoder.named_modules():
+            if 'attention' in name or 'attn' in name:
+                handle = module.register_forward_hook(attention_hook)
+                self.attention_hooks.append(handle)
+
+    def _remove_attention_hooks(self):
+        """Remove all attention hooks"""
+        for handle in self.attention_hooks:
+            handle.remove()
+        self.attention_hooks = []
 
     def forward(self, source, save_attn=False, src_key_padding_mask=None, **kwargs):   
-
+        
         if save_attn:
             fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
             torch.backends.mha.set_fastpath_enabled(False)
             self.attention_maps_slice = []
             self.attention_maps = []
             self.hooks = []
+            # Try both HF method and hooks
+            self._register_attention_hooks()
             self.register_hooks()
-
 
         x = source.to(self.device) # [B, C, D, H, W]
         B, C, *_ = x.shape
- 
 
-        x = rearrange(x, 'b c d h w -> (b d c) h w')
-        x = x[:, None]
-        x = x.repeat(1, 3, 1, 1) # Gray to RGB
+        # Fix preprocessing - handle dimensions properly
+        x = rearrange(x, 'b c d h w -> (b d) c h w')
+        
+        # Convert grayscale to RGB if needed
+        if x.shape[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
 
-        if hasattr(self, 'image_processor'):
-            # The processor expects a list of PIL images or numpy arrays, not a batch tensor.
-            # We also don't need to convert to PIL and back if the processor handles tensors.
-            # Let's check the docs again... it seems to handle tensors directly.
-            inputs = self.image_processor(x, return_tensors="pt")['pixel_values'].to(self.device)
-            # Enable attention output for Hugging Face transformers
-            outputs = self.encoder(inputs, output_attentions=save_attn)
-            x = outputs.pooler_output
-            
-            # Capture attention maps if save_attn is True
-            if save_attn and hasattr(outputs, 'attentions') and outputs.attentions is not None:
-                # Get the last layer's attention weights
-                last_attn = outputs.attentions[-1]  # [B*D, Heads, seq_len, seq_len]
-                self.attention_maps.append(last_attn)
+        if hasattr(self, 'use_official_weights') and self.use_official_weights:
+            # Use official Meta DinoV3 weights - works like DinoV2
+            x = self.encoder(x)  # Direct forward pass like DinoV2
+        elif hasattr(self, 'image_processor'):
+            try:
+                # Method 1: Try standard HF approach
+                inputs = self.image_processor(x, return_tensors="pt")
+                
+                # Handle different return types from image processor
+                if hasattr(inputs, 'pixel_values'):
+                    inputs = inputs.pixel_values.to(self.device)
+                elif isinstance(inputs, dict) and 'pixel_values' in inputs:
+                    inputs = inputs['pixel_values'].to(self.device)
+                elif hasattr(inputs, 'data') and isinstance(inputs.data, dict) and 'pixel_values' in inputs.data:
+                    inputs = inputs.data['pixel_values'].to(self.device)
+                elif isinstance(inputs, torch.Tensor):
+                    inputs = inputs.to(self.device)
+                else:
+                    raise ValueError(f"Unexpected input type from processor: {type(inputs)}")
+                
+                # Force attention output
+                outputs = self.encoder(inputs, output_attentions=True, return_dict=True)
+                x = outputs.pooler_output
+                
+                # Debug attention extraction
+                if save_attn:
+                    print(f"DinoV3 Debug: Model type: {type(self.encoder)}")
+                    print(f"DinoV3 Debug: Output type: {type(outputs)}")
+                    print(f"DinoV3 Debug: Output keys: {list(outputs.keys()) if hasattr(outputs, 'keys') else 'No keys'}")
+                    
+                    if hasattr(outputs, 'attentions') and outputs.attentions is not None:
+                        print(f"DinoV3 Debug: Found {len(outputs.attentions)} attention layers")
+                        for i, attn in enumerate(outputs.attentions):
+                            print(f"DinoV3 Debug: Layer {i} attention shape: {attn.shape}")
+                        # Store all attention layers
+                        self.attention_maps.extend([attn.detach() for attn in outputs.attentions])
+                    else:
+                        print("DinoV3 Debug: No attentions found in outputs")
+                        print("DinoV3 Debug: Trying alternative extraction...")
+                        
+                        # Method 2: Try to extract from last_hidden_state or other outputs
+                        if hasattr(outputs, 'last_hidden_state'):
+                            print(f"DinoV3 Debug: Found last_hidden_state: {outputs.last_hidden_state.shape}")
+                        
+                        # Method 3: Check if hooks captured anything
+                        if self.attention_maps:
+                            print(f"DinoV3 Debug: Hooks captured {len(self.attention_maps)} attention maps")
+                        else:
+                            print("DinoV3 Debug: No attention captured through hooks either")
+                            
+            except Exception as e:
+                print(f"DinoV3 Debug: Error in processing: {e}")
+                # Fallback: process images individually
+                processed_images = []
+                for i in range(x.shape[0]):
+                    img = x[i:i+1]  # Keep batch dimension
+                    try:
+                        processed = self.image_processor(img, return_tensors="pt")
+                        if hasattr(processed, 'pixel_values'):
+                            processed = processed.pixel_values
+                        elif isinstance(processed, dict) and 'pixel_values' in processed:
+                            processed = processed['pixel_values']
+                        elif hasattr(processed, 'data') and 'pixel_values' in processed.data:
+                            processed = processed.data['pixel_values']
+                        
+                        # Ensure it's a tensor
+                        if isinstance(processed, torch.Tensor):
+                            processed_images.append(processed)
+                        else:
+                            print(f"DinoV3 Debug: Unexpected processed type: {type(processed)}")
+                            # Use direct tensor if processor fails
+                            processed_images.append(img)
+                            
+                    except Exception as img_e:
+                        print(f"DinoV3 Debug: Error processing image {i}: {img_e}")
+                        # Use direct tensor if processor fails
+                        processed_images.append(img)
+                
+                if processed_images:
+                    inputs = torch.cat(processed_images, dim=0).to(self.device)
+                    outputs = self.encoder(inputs, output_attentions=True, return_dict=True)
+                    x = outputs.pooler_output if hasattr(outputs, 'pooler_output') else outputs.last_hidden_state.mean(dim=1)
         else:
-            x = self.encoder(x) # [(B D), C, H, W] -> [(B D), out] 
+            # Non-pretrained model path
+            x = self.encoder(x)
 
         # Bottleneck: force to focus on relevant features for classification 
         if hasattr(self, 'bottleneck'):
@@ -417,6 +540,7 @@ class DinoV3ClassifierSlice(BasicClassifier):
         if save_attn:
             torch.backends.mha.set_fastpath_enabled(fastpath_enabled)
             self.deregister_hooks()
+            self._remove_attention_hooks()
 
         # Logits 
         if kwargs.get('without_linear', False):
@@ -424,10 +548,21 @@ class DinoV3ClassifierSlice(BasicClassifier):
         x = self.linear(x) 
         return x
     
+    def get_attention_spatial_shape(self):
+        """Get the spatial dimensions for attention reshaping based on model size"""
+        if self.model_size == 'g':
+            return 16, 16  # 224/14 = 16 patches per side for giant model
+        else:
+            return 14, 14  # 224/16 = 14 patches per side for other models
+    
     def get_slice_attention(self):
+        if not self.attention_maps_slice:
+            print("Warning: No slice attention maps available")
+            return None
+            
         attention_map_slice = self.attention_maps_slice[-1] # [B, Heads, 1+D(+regs), 1+D(+regs)]
         attention_map_slice = attention_map_slice[:, :, 0, 1:] # [B, Heads, D]
-        attention_map_slice /= attention_map_slice.sum(dim=-1, keepdim=True)
+        attention_map_slice /= (attention_map_slice.sum(dim=-1, keepdim=True) + 1e-8)
 
         # Option 1:
         attention_map_slice = attention_map_slice.mean(dim=1)  # [B, D]
@@ -437,51 +572,78 @@ class DinoV3ClassifierSlice(BasicClassifier):
         return attention_map_slice
 
     def get_plane_attention(self):
-        # This method will likely need adjustment as the Hugging Face model's attention mechanism may differ.
-        # For now, it is left as is, but may raise errors if called.
         if not self.attention_maps:
-            print("Warning: No attention maps captured, returning dummy attention")
-            # Return dummy attention if no attention maps are available
-            # Use the actual spatial dimensions from the input
-            if hasattr(self, '_last_input_shape'):
-                B, D, H, W = self._last_input_shape[0], self._last_input_shape[2], self._last_input_shape[3], self._last_input_shape[4]
-                spatial_tokens = (H // 14) * (W // 14)  # Assuming patch size 14
-            else:
-                B, D = 1, 32
-                spatial_tokens = 196  # Default 14x14 = 196 for ViT
-            
-            device = next(self.parameters()).device
-            return torch.ones((B*D, 1, spatial_tokens), device=device) / spatial_tokens
+            print("ERROR: No attention maps stored!")
+            return None
             
         print(f"Processing attention maps: {len(self.attention_maps)} maps available")
         attention_map_dino = self.attention_maps[-1] # [B*D, Heads, seq_len, seq_len]
         print(f"Raw attention shape: {attention_map_dino.shape}")
         
-        # For DinoV3, extract attention to image patches (skip CLS token)
-        img_slice = slice(1, None) 
-        attention_map_dino = attention_map_dino[:,:, 0, img_slice] # [B*D, Heads, HW]
-        print(f"After CLS extraction: {attention_map_dino.shape}")
+        # Verify attention shape
+        if len(attention_map_dino.shape) != 4:
+            print(f"ERROR: Expected 4D attention tensor, got {len(attention_map_dino.shape)}D")
+            return None
         
-        # Set first patch to 0 and normalize
-        if attention_map_dino.shape[-1] > 0:
-            attention_map_dino[:,:,0] = 0
-        attention_map_dino = attention_map_dino / (attention_map_dino.sum(dim=-1, keepdim=True) + 1e-8)
+        batch_size, num_heads, seq_len, seq_len2 = attention_map_dino.shape
         
-        print(f"Final attention shape: {attention_map_dino.shape}")
-        print(f"Attention stats - min: {attention_map_dino.min():.6f}, max: {attention_map_dino.max():.6f}")
+        # Calculate expected number of patches based on model
+        h_patches, w_patches = self.get_attention_spatial_shape()
+        expected_tokens = h_patches * w_patches + 1  # +1 for CLS token
         
-        return attention_map_dino
+        print(f"Expected tokens: {expected_tokens}, Actual: {seq_len}")
+        
+        if seq_len < 2:
+            print(f"ERROR: Too few tokens in attention: {seq_len}")
+            return None
+        
+        # For DinoV3, extract attention from CLS token to image patches
+        cls_to_patches = attention_map_dino[:, :, 0, 1:]  # [B*D, Heads, num_patches]
+        print(f"After CLS extraction: {cls_to_patches.shape}")
+        
+        # Handle edge case where we have fewer patches than expected
+        if cls_to_patches.shape[-1] == 0:
+            print("ERROR: No patch tokens found after CLS extraction")
+            return None
+        
+        # Set first patch to 0 and normalize (optional - remove if not needed)
+        cls_to_patches_normalized = cls_to_patches.clone()
+        if cls_to_patches_normalized.shape[-1] > 0:
+            cls_to_patches_normalized[:, :, 0] = 0
+        cls_to_patches_normalized = cls_to_patches_normalized / (cls_to_patches_normalized.sum(dim=-1, keepdim=True) + 1e-8)
+        
+        print(f"Final attention shape: {cls_to_patches_normalized.shape}")
+        print(f"Attention stats - min: {cls_to_patches_normalized.min():.6f}, max: {cls_to_patches_normalized.max():.6f}")
+        
+        # Average across attention heads
+        cls_to_patches_normalized = cls_to_patches_normalized.mean(dim=1)  # [B*D, num_patches]
+        
+        return cls_to_patches_normalized
 
     def get_attention_maps(self):
         attention_map_dino = self.get_plane_attention()
+        if attention_map_dino is None:
+            return None
+            
         attention_map_slice = self.get_slice_attention()
+        if attention_map_slice is None:
+            # Return just plane attention if slice attention is not available
+            return attention_map_dino
         
-        attention_map = attention_map_slice*attention_map_dino
+        # Reshape plane attention to match slice attention dimensions for multiplication
+        if attention_map_dino.dim() == 2:  # [B*D, num_patches]
+            attention_map_dino = attention_map_dino.unsqueeze(-1).unsqueeze(-1)  # [B*D, num_patches, 1, 1]
+            attention_map_dino = attention_map_dino.squeeze(-1).squeeze(-1)  # Back to [B*D, num_patches]
+        
+        # Combine slice and plane attention
+        attention_map = attention_map_slice.squeeze() * attention_map_dino
         return attention_map
     
     def get_attention_cls(self):
         """ Calculate the attention in the first layer starting from the CLS token in the last layer. """
-        # This method will likely need adjustment.
+        if not self.attention_maps:
+            return None
+            
         attention_to_cls = self.attention_maps[-1]
         # Propagate the attention backwards
         for attn in reversed(self.attention_maps[:-1]):
@@ -491,31 +653,108 @@ class DinoV3ClassifierSlice(BasicClassifier):
         return attention_to_cls
     
     def register_hooks(self):
-        # This method will likely need adjustment for the Hugging Face model.
         def enable_attention(module):
-            forward_orig = module.forward
-            def forward_wrap(*args, **kwargs):
-                kwargs["need_weights"] = True
-                kwargs["average_attn_weights"] = False
-                return forward_orig(*args, **kwargs)
-            module.forward = forward_wrap
-            module.foward_orig = forward_orig
+            if hasattr(module, 'forward'):
+                forward_orig = module.forward
+                def forward_wrap(*args, **kwargs):
+                    kwargs["need_weights"] = True
+                    kwargs["average_attn_weights"] = False
+                    return forward_orig(*args, **kwargs)
+                module.forward = forward_wrap
+                module.forward_orig = forward_orig
+
+        def enable_attention_dinov3(mod):
+            """Hook for official DinoV3 attention layers (similar to DinoV2)"""
+            forward_orig = mod.forward
+            def forward_wrap(self2, x):
+                # Similar to DinoV2 attention capture
+                B, N, C = x.shape
+                qkv = self2.qkv(x).reshape(B, N, 3, self2.num_heads, C // self2.num_heads).permute(2, 0, 3, 1, 4)
+                
+                q, k, v = qkv[0] * self2.scale, qkv[1], qkv[2]
+                attn = q @ k.transpose(-2, -1)
+       
+                attn = attn.softmax(dim=-1)
+                attn = attn if isinstance(self2.attn_drop, float) else self2.attn_drop(attn)
+                x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+                x = self2.proj(x)
+                x = self2.proj_drop(x)
+
+                # Hook attention map 
+                self.attention_maps.append(attn.detach())
+
+                return x
+            
+            mod.forward = lambda x: forward_wrap(mod, x)
+            mod.forward_orig = forward_orig
 
         def append_attention_maps(module, input, output):
-            self.attention_maps_slice.append(output[1])
+            if isinstance(output, tuple) and len(output) > 1:
+                attn_weights = output[1]
+                if isinstance(attn_weights, torch.Tensor) and attn_weights.dim() == 4:
+                    self.attention_maps_slice.append(attn_weights.detach())
 
+        # Hook DinoV3 Attention based on model type
+        if hasattr(self, 'use_official_weights') and self.use_official_weights:
+            # Official Meta weights - hook like DinoV2
+            for name, mod in self.encoder.named_modules():
+                if name.endswith('.attn'):
+                    enable_attention_dinov3(mod)
+        
         # Hook Slice Attention
-        for _, mod in self.slice_fusion.named_modules():
-            if isinstance(mod, nn.MultiheadAttention):
-                enable_attention(mod)
-                self.hooks.append(mod.register_forward_hook(append_attention_maps))
-
+        if hasattr(self, 'slice_fusion'):
+            for _, mod in self.slice_fusion.named_modules():
+                if isinstance(mod, nn.MultiheadAttention):
+                    enable_attention(mod)
+                    handle = mod.register_forward_hook(append_attention_maps)
+                    self.hooks.append(handle)
 
     def deregister_hooks(self):
         for handle in self.hooks:
             handle.remove()
+        self.hooks = []
     
-        # Slice Attention
-        for _, mod in self.slice_fusion.named_modules():
-            if isinstance(mod, nn.MultiheadAttention):
-                mod.forward = mod.foward_orig
+        # Restore original forward methods for official DinoV3
+        if hasattr(self, 'use_official_weights') and self.use_official_weights:
+            for name, mod in self.encoder.named_modules():
+                if name.endswith('.attn') and hasattr(mod, 'forward_orig'):
+                    mod.forward = mod.forward_orig
+                    delattr(mod, 'forward_orig')
+        
+        # Restore original forward methods for slice fusion
+        if hasattr(self, 'slice_fusion'):
+            for _, mod in self.slice_fusion.named_modules():
+                if isinstance(mod, nn.MultiheadAttention) and hasattr(mod, 'forward_orig'):
+                    mod.forward = mod.forward_orig
+                    delattr(mod, 'forward_orig')
+
+    def test_attention_extraction(self):
+        """Test function to debug attention extraction"""
+        print("Testing attention extraction...")
+        
+        # Create a simple test input
+        test_input = torch.randn(1, 1, 4, 224, 224).to(self.device)  # Small test case
+        
+        # Force save_attn=True
+        with torch.no_grad():
+            output = self.forward(test_input, save_attn=True)
+        
+        print(f"Test completed. Output shape: {output.shape}")
+        print(f"DinoV3 attention maps collected: {len(self.attention_maps)}")
+        print(f"Slice attention maps collected: {len(self.attention_maps_slice)}")
+        
+        if self.attention_maps:
+            for i, attn in enumerate(self.attention_maps):
+                print(f"Attention map {i} shape: {attn.shape}")
+            
+            # Test attention processing
+            plane_attn = self.get_plane_attention()
+            if plane_attn is not None:
+                print(f"Plane attention extracted successfully: {plane_attn.shape}")
+                return True
+            else:
+                print("Failed to extract plane attention")
+                return False
+        else:
+            print("No attention maps captured - check model compatibility")
+            return False
