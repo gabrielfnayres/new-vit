@@ -10,6 +10,8 @@
 !*.ui
 !*.yaml
 !*.sbatch
+!mst/**
+!scripts/**
 
 !requirements.txt
 !version.txt

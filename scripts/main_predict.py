@@ -25,7 +25,7 @@ from mst.data.datasets.dataset_3d_lidc import LIDC_Dataset3D
 from mst.data.datasets.dataset_3d_mrnet import MRNet_Dataset3D
 from mst.data.datamodules import DataModule
 from mst.models.resnet import ResNet, ResNetSliceTrans
-from mst.models.dino import DinoV2ClassifierSlice
+from mst.models.dino import DinoV2ClassifierSlice, DinoV3ClassifierSlice
 from mst.utils.roc_curve import plot_roc_curve, cm2acc, cm2x
 from mst.models.utils.functions import tensor2image, tensor_cam2image, minmax_norm, one_hot
 
@@ -46,6 +46,8 @@ def get_model(name, **kwargs):
         return ResNetSliceTrans
     elif name == 'DinoV2ClassifierSlice':
         return DinoV2ClassifierSlice
+    elif name == 'DinoV3ClassifierSlice':
+        return DinoV3ClassifierSlice
     else:
         raise ValueError(f"Unknown model: {name}")
 
@@ -67,7 +69,17 @@ def _pred_trans(model, source, src_key_padding_mask, save_attn=False, use_softma
     # Spatial attention     
     weight = model.get_attention_maps()  # [B*D, Heads, HW]
     weight = weight.mean(dim=1) # Mean of heads 
-    spatial_shape = weight.shape[-2:] if isinstance(model, ResNetSliceTrans) else torch.tensor(source.shape[3:])//14 
+    
+    # Calculate spatial shape based on model type and actual weight dimensions
+    if isinstance(model, ResNetSliceTrans):
+        spatial_shape = weight.shape[-2:]
+    else:
+        # For DinoV3/V2, calculate spatial dimensions from weight tensor
+        B, D = source.shape[0], source.shape[2]
+        total_spatial_tokens = weight.shape[-1]
+        spatial_dim = int(total_spatial_tokens ** 0.5)  # Assume square spatial layout
+        spatial_shape = (spatial_dim, spatial_dim)
+    
     weight = weight.view(1, 1, source.shape[2], *spatial_shape)
 
     # Slice attention 
@@ -110,6 +122,8 @@ def run_pred(model, batch, save_attn=False, use_softmax=True, use_tta=False):
         pred_func = _pred_resnet
     elif isinstance(model, DinoV2ClassifierSlice):
         pred_func = _pred_trans
+    elif isinstance(model, DinoV3ClassifierSlice):
+        pred_func = _pred_trans
 
     pred, weight, weight_slice = pred_func(model, source, src_key_padding_mask, save_attn, use_softmax)    
 
@@ -138,7 +152,7 @@ def run_pred(model, batch, save_attn=False, use_softmax=True, use_tta=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--run_dir', default='./runs', type=str)
-    parser.add_argument('--run_folder', default='DUKE/DinoV2ClassifierSlice', type=str)
+    parser.add_argument('--run_folder', default='DUKE/DinoV3ClassifierSlice', type=str)
     parser.add_argument('--output_dir', default='./', type=str)
     parser.add_argument('--get_attention', action='store_true', help='Flag to get attention')
     parser.add_argument('--get_segmentation', action='store_true', help='Flag to get attention')
@@ -156,7 +170,7 @@ if __name__ == "__main__":
 
     #------------ Settings/Defaults ----------------
     path_run = Path(args.run_dir)/run_folder
-    results_folder = 'results_tta'if use_tta else 'results-full'
+    results_folder = 'results_tta'if use_tta else 'results-v3'
     path_out = Path(args.output_dir)/results_folder/run_folder
     path_out.mkdir(parents=True, exist_ok=True)
     device = torch.device("cuda") 

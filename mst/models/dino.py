@@ -376,8 +376,15 @@ class DinoV3ClassifierSlice(BasicClassifier):
             # We also don't need to convert to PIL and back if the processor handles tensors.
             # Let's check the docs again... it seems to handle tensors directly.
             inputs = self.image_processor(x, return_tensors="pt")['pixel_values'].to(self.device)
-            outputs = self.encoder(inputs)
+            # Enable attention output for Hugging Face transformers
+            outputs = self.encoder(inputs, output_attentions=save_attn)
             x = outputs.pooler_output
+            
+            # Capture attention maps if save_attn is True
+            if save_attn and hasattr(outputs, 'attentions') and outputs.attentions is not None:
+                # Get the last layer's attention weights
+                last_attn = outputs.attentions[-1]  # [B*D, Heads, seq_len, seq_len]
+                self.attention_maps.append(last_attn)
         else:
             x = self.encoder(x) # [(B D), C, H, W] -> [(B D), out] 
 
@@ -432,11 +439,37 @@ class DinoV3ClassifierSlice(BasicClassifier):
     def get_plane_attention(self):
         # This method will likely need adjustment as the Hugging Face model's attention mechanism may differ.
         # For now, it is left as is, but may raise errors if called.
-        attention_map_dino = self.attention_maps[-1] # [B*D, Heads, 1+HW, 1+HW]
+        if not self.attention_maps:
+            print("Warning: No attention maps captured, returning dummy attention")
+            # Return dummy attention if no attention maps are available
+            # Use the actual spatial dimensions from the input
+            if hasattr(self, '_last_input_shape'):
+                B, D, H, W = self._last_input_shape[0], self._last_input_shape[2], self._last_input_shape[3], self._last_input_shape[4]
+                spatial_tokens = (H // 14) * (W // 14)  # Assuming patch size 14
+            else:
+                B, D = 1, 32
+                spatial_tokens = 196  # Default 14x14 = 196 for ViT
+            
+            device = next(self.parameters()).device
+            return torch.ones((B*D, 1, spatial_tokens), device=device) / spatial_tokens
+            
+        print(f"Processing attention maps: {len(self.attention_maps)} maps available")
+        attention_map_dino = self.attention_maps[-1] # [B*D, Heads, seq_len, seq_len]
+        print(f"Raw attention shape: {attention_map_dino.shape}")
+        
+        # For DinoV3, extract attention to image patches (skip CLS token)
         img_slice = slice(1, None) 
         attention_map_dino = attention_map_dino[:,:, 0, img_slice] # [B*D, Heads, HW]
-        attention_map_dino[:,:,0] = 0
-        attention_map_dino /= attention_map_dino.sum(dim=-1, keepdim=True)
+        print(f"After CLS extraction: {attention_map_dino.shape}")
+        
+        # Set first patch to 0 and normalize
+        if attention_map_dino.shape[-1] > 0:
+            attention_map_dino[:,:,0] = 0
+        attention_map_dino = attention_map_dino / (attention_map_dino.sum(dim=-1, keepdim=True) + 1e-8)
+        
+        print(f"Final attention shape: {attention_map_dino.shape}")
+        print(f"Attention stats - min: {attention_map_dino.min():.6f}, max: {attention_map_dino.max():.6f}")
+        
         return attention_map_dino
 
     def get_attention_maps(self):
