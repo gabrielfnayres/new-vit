@@ -50,7 +50,18 @@ def tensor2image(tensor, batch=0):
     Returns:
         torch.Tensor: Image of shape [B, C, H, W] or [DxC,1, H, W]  (Compatible with torchvision.utils.save_image)
     """
-    return (tensor if tensor.ndim<5 else torch.swapaxes(tensor[batch], 0, 1).reshape(-1, *tensor.shape[-2:])[:,None])
+    if tensor.ndim < 5:
+        return tensor
+    else:
+        # For 5D tensors [B, C, D, H, W], extract batch and reshape to [D, C, H, W]
+        tensor_batch = tensor[batch]  # [C, D, H, W]
+        # Move depth dimension to batch dimension: [D, C, H, W]
+        tensor_reshaped = tensor_batch.permute(1, 0, 2, 3)  # [D, C, H, W]
+        # Add singleton dimension for compatibility: [D, 1, H, W] if C=1
+        if tensor_reshaped.shape[1] == 1:
+            return tensor_reshaped
+        else:
+            return tensor_reshaped.reshape(-1, 1, *tensor.shape[-2:])  # [D*C, 1, H, W]
 
 
 def tensor_mask2image(tensor, mask_hot, batch=0, alpha=0.25, colors=None, exclude_chs=[], exclude_classes=[0]):

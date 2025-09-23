@@ -67,8 +67,11 @@ def _pred_trans(model, source, src_key_padding_mask, save_attn=False, use_softma
         return pred, None, None 
 
     # Spatial attention     
-    weight = model.get_attention_maps()  # [B*D, Heads, HW]
-    weight = weight.mean(dim=1) # Mean of heads 
+    weight = model.get_attention_maps()  # [B*D, HW] or [B*D, Heads, HW]
+    
+    # Handle different tensor dimensions
+    if weight.dim() == 3:  # [B*D, Heads, HW]
+        weight = weight.mean(dim=1)  # Mean of heads -> [B*D, HW]
     
     # Calculate spatial shape based on model type and actual weight dimensions
     if isinstance(model, ResNetSliceTrans):
@@ -77,8 +80,22 @@ def _pred_trans(model, source, src_key_padding_mask, save_attn=False, use_softma
         # For DinoV3/V2, calculate spatial dimensions from weight tensor
         B, D = source.shape[0], source.shape[2]
         total_spatial_tokens = weight.shape[-1]
-        spatial_dim = int(total_spatial_tokens ** 0.5)  # Assume square spatial layout
-        spatial_shape = (spatial_dim, spatial_dim)
+        
+        # Handle DinoV3 specific case: 200 tokens = 14x14 + 4 extra tokens
+        if total_spatial_tokens == 200:
+            spatial_shape = (14, 14)  # Use 14x14 and pad/truncate as needed
+            # Truncate to 196 tokens to fit 14x14 grid
+            weight = weight[:, :196]
+        elif total_spatial_tokens == 196:
+            spatial_shape = (14, 14)  # Standard 14x14 for DinoV2/V3
+        else:
+            # Fallback: assume square layout
+            spatial_dim = int(total_spatial_tokens ** 0.5)
+            spatial_shape = (spatial_dim, spatial_dim)
+            # Ensure we have the right number of tokens
+            expected_tokens = spatial_dim * spatial_dim
+            if total_spatial_tokens > expected_tokens:
+                weight = weight[:, :expected_tokens]
     
     weight = weight.view(1, 1, source.shape[2], *spatial_shape)
 
@@ -278,8 +295,7 @@ if __name__ == "__main__":
             weight = weight.detach().cpu()
             weight = weight.clip(*np.quantile(weight, [0.995, 0.999]))
 
-
-            # Save 
+            # Save using same approach as DinoV2
             save_image(tensor2image(source), path_out_dir/f'input_{uid}.png', normalize=True)
             save_image(tensor_cam2image(minmax_norm(source), minmax_norm(weight), alpha=0.5), 
                         path_out_dir/f"overlay_{uid}.png", normalize=False)

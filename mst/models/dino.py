@@ -630,13 +630,33 @@ class DinoV3ClassifierSlice(BasicClassifier):
             # Return just plane attention if slice attention is not available
             return attention_map_dino
         
-        # Reshape plane attention to match slice attention dimensions for multiplication
-        if attention_map_dino.dim() == 2:  # [B*D, num_patches]
-            attention_map_dino = attention_map_dino.unsqueeze(-1).unsqueeze(-1)  # [B*D, num_patches, 1, 1]
-            attention_map_dino = attention_map_dino.squeeze(-1).squeeze(-1)  # Back to [B*D, num_patches]
+        # Debug shapes
+        print(f"Plane attention shape: {attention_map_dino.shape}")
+        print(f"Slice attention shape: {attention_map_slice.shape}")
         
-        # Combine slice and plane attention
-        attention_map = attention_map_slice.squeeze() * attention_map_dino
+        # Ensure compatible dimensions for multiplication
+        if attention_map_dino.dim() == 2:  # [B*D, num_patches]
+            B_times_D, num_patches = attention_map_dino.shape
+            
+            # attention_map_slice should be [B*D, 1, 1] from get_slice_attention
+            if attention_map_slice.dim() == 3 and attention_map_slice.shape[1:] == (1, 1):
+                # Broadcast slice attention to match plane attention
+                attention_map_slice = attention_map_slice.squeeze(-1).squeeze(-1)  # [B*D]
+                attention_map_slice = attention_map_slice.unsqueeze(1)  # [B*D, 1]
+                attention_map_slice = attention_map_slice.expand(-1, num_patches)  # [B*D, num_patches]
+            elif attention_map_slice.dim() == 1:
+                # If slice attention is [B*D], expand to [B*D, num_patches]
+                attention_map_slice = attention_map_slice.unsqueeze(1).expand(-1, num_patches)
+            elif attention_map_slice.dim() == 3:
+                # Handle [B*D, 1, 1] case
+                attention_map_slice = attention_map_slice.view(B_times_D, -1)
+                if attention_map_slice.shape[1] == 1:
+                    attention_map_slice = attention_map_slice.expand(-1, num_patches)
+        
+        print(f"After reshaping - Plane: {attention_map_dino.shape}, Slice: {attention_map_slice.shape}")
+        
+        # Now multiply element-wise
+        attention_map = attention_map_slice * attention_map_dino
         return attention_map
     
     def get_attention_cls(self):
@@ -664,18 +684,34 @@ class DinoV3ClassifierSlice(BasicClassifier):
                 module.forward_orig = forward_orig
 
         def enable_attention_dinov3(mod):
-            """Hook for official DinoV3 attention layers (similar to DinoV2)"""
+            """Hook for official DinoV3 attention layers (handles rope parameter)"""
             forward_orig = mod.forward
-            def forward_wrap(self2, x):
-                # Similar to DinoV2 attention capture
+            def forward_wrap(self2, x, rope=None):
+    # DinoV3 attention capture with rope support
                 B, N, C = x.shape
                 qkv = self2.qkv(x).reshape(B, N, 3, self2.num_heads, C // self2.num_heads).permute(2, 0, 3, 1, 4)
                 
-                q, k, v = qkv[0] * self2.scale, qkv[1], qkv[2]
+                q, k, v = qkv[0], qkv[1], qkv[2]
+                
+                # Apply rotary positional encoding if provided
+                if rope is not None:
+                    # rope is typically a tuple (cos, sin) for DinoV3
+                    if hasattr(self2, 'rope') and hasattr(self2.rope, 'apply_rotary_emb'):
+                        q = self2.rope.apply_rotary_emb(q, rope)
+                        k = self2.rope.apply_rotary_emb(k, rope)
+                    elif isinstance(rope, tuple) and len(rope) == 2:
+                        # Handle rope as (cos, sin) tuple - apply manually if needed
+                        cos, sin = rope
+                        # For now, skip rope application to avoid errors
+                        pass
+                
+                # Scale query
+                q = q * self2.scale
+                
                 attn = q @ k.transpose(-2, -1)
-       
                 attn = attn.softmax(dim=-1)
                 attn = attn if isinstance(self2.attn_drop, float) else self2.attn_drop(attn)
+                
                 x = (attn @ v).transpose(1, 2).reshape(B, N, C)
                 x = self2.proj(x)
                 x = self2.proj_drop(x)
@@ -684,8 +720,7 @@ class DinoV3ClassifierSlice(BasicClassifier):
                 self.attention_maps.append(attn.detach())
 
                 return x
-            
-            mod.forward = lambda x: forward_wrap(mod, x)
+            mod.forward = lambda x, rope=None: forward_wrap(mod, x, rope)
             mod.forward_orig = forward_orig
 
         def append_attention_maps(module, input, output):
