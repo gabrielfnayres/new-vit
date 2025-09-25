@@ -2,8 +2,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 from scipy.ndimage import gaussian_filter1d
-import einops
 from itertools import permutations
+import torchio as tio
+import torch
 def crop_breast_height(image, margin_top=10):
     "Crop height to 256 and try to cover breast based on intensity localization"
     # threshold = int(image.data.float().quantile(0.9))
@@ -53,13 +54,14 @@ def find_breast_center_kspace(kspace, method='valley'):
         if len(peaks) >= 2:
             peak_heights = smoothed[peaks]
             top_peaks_idx = np.argsort(peak_heights)[-2:]
+
             left_peak = peaks[min(top_peaks_idx)]
             right_peak = peaks[max(top_peaks_idx)]
             
             valley_region = smoothed[left_peak:right_peak+1]
             valley_idx = np.argmin(valley_region) + left_peak
             
-            return valley_idx, horizontal_profile, peaks
+            return background_idx, valley_idx, horizontal_profile, peaks
         
     return len(horizontal_profile) // 2, horizontal_profile, []
 
@@ -76,16 +78,36 @@ def find_breast_center_intensity(image):
         top_peaks_idx = np.argsort(peak_heights)[-2:]
         left_peak = peaks[min(top_peaks_idx)]
         right_peak = peaks[max(top_peaks_idx)]
+    
+        vertical_profile = np.sum(image, axis=1)
+        vertical_profile = vertical_profile / np.max(vertical_profile)
         
+        threshold = 0.1  
+        background_regions = np.where(vertical_profile < threshold)[0]
+        
+        if len(background_regions) > 0:
+            top_half = background_regions[background_regions < len(vertical_profile) // 2]
+            if len(top_half) > 0:
+                background_idx_top = top_half[-1] 
+            else:
+                background_idx_top = 0
+    
+        else:
+            background_idx_top = 0
+
         valley_region = smoothed[left_peak:right_peak+1]
         valley_idx = np.argmin(valley_region) + left_peak
         
-        return valley_idx, horizontal_profile, peaks
-    return len(horizontal_profile) // 2, horizontal_profile, []
+        return background_idx_top, valley_idx, horizontal_profile, peaks
+    return 0, 0, len(horizontal_profile) // 2, horizontal_profile, []
 
 
-def crop_breasts(image, center_x):
+def crop_breasts(image, center_x, background_top=None):
     height, width = image.shape
+    
+    if background_top is not None:
+        image = image[background_top:, :] 
+
     left_breast = image[:, :center_x]
     right_breast = image[:, center_x:]
     
@@ -131,7 +153,8 @@ def plot_cropped_results(left_breast, right_breast):
 if __name__ == "__main__":
     image = np.load(r'\\rad-maid-004\D\Duke-Cancer_MRI\preprocessed-v1\data\Breast_MRI_001\pre.npy')
     mask = np.load(r'D:\Users\UFPB\gabriel ayres\3D-Breast-FGT-and-Blood-Vessel-Segmentation\duke_output\breast\Breast_MRI_001.npy')
-    
+    target_spacing = (0.7, 0.7, 3)
+    target_shape = (32, 512, 512)
     print(f"Image shape: {image.shape}")
     print(f"Mask shape: {mask.shape}")
     
@@ -152,9 +175,10 @@ if __name__ == "__main__":
     center_kspace, profile_kspace, peaks_kspace = find_breast_center_kspace(kspace, method='valley')
     print(f"K-space center: {center_kspace}")
     
-    center_intensity, profile_intensity, peaks_intensity = find_breast_center_intensity(slice_image_original)
+    background_idx_top, center_intensity, profile_intensity, peaks_intensity = find_breast_center_intensity(slice_image_original)
     chosen_center = center_intensity
     
+    print(f"Background crop at: {background_idx_top}")
     print(f"Cropping coordinates - Left: 0 to {chosen_center}, Right: {chosen_center} to {slice_image_original.shape[1]}")
     
     if image.shape == mask.shape:
@@ -164,7 +188,17 @@ if __name__ == "__main__":
         print(f"Warning: Could not match shapes. Using image without mask.")
         slice_image_masked = slice_image_original
     
-    left_breast, right_breast = crop_breasts(slice_image_masked, chosen_center)
+    left_breast, right_breast = crop_breasts(slice_image_masked, chosen_center, background_top=None)
+    
+    left_breast_tio = tio.ScalarImage(tensor=left_breast[None, :, :, None])
+    right_breast_tio = tio.ScalarImage(tensor=right_breast[None, :, :, None])
+    
+    transform = tio.Resize((224, 224, 1))
+    left_breast_resized = transform(left_breast_tio)
+    right_breast_resized = transform(right_breast_tio)
+    
+    left_breast = left_breast_resized.data.squeeze().numpy() 
+    right_breast = right_breast_resized.data.squeeze().numpy() 
     
     plot_analysis(slice_image_original, profile_kspace, center_kspace, peaks_kspace, "K-space Valley (Original)")
     plot_analysis(slice_image_original, profile_intensity, center_intensity, peaks_intensity, "Intensity (Original)")
